@@ -46,4 +46,4 @@ class VLADDinoV2FeatureExtractor:
         return images
 
     @property
-    def feature_length(self): return self.vlad.desc_dim
+    def feature_length(self): return self.vlad.desc_dim * self.vlad.num_clusters
