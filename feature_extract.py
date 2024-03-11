@@ -44,3 +44,6 @@ class VLADDinoV2FeatureExtractor:
                 w = self.max_image_size
             return functional.resize(images, (h, w), interpolation=functional.InterpolationMode.BICUBIC)
         return images
+
+    @property
+    def feature_length(self): return self.vlad.desc_dim
