@@ -2,19 +2,23 @@ import os
 import torch
 from torchvision import transforms
 from torchvision.transforms import functional
-from .utilities import DinoV2ExtractFeatures
-from .utilities import VLAD
+from .utilities import DinoV2ExtractFeatures, VLAD
 
 
 class VLADDinoV2FeatureExtractor:
 
-    def __init__(self, root, content):
+    def __init__(self, root, content, pipeline=False):
         self.max_image_size = content["max_image_size"]
         self.device = "cuda" if content["cuda"] else "cpu"
 
+        if content["ckpt_path"] == "None":
+            weights_source = content["model_type"]
+            print(f"AnyLoc extractor ignores pipeline option (={pipeline}) because ckpt_path is None")
+        else:
+            weights_source = os.path.join(content["ckpt_path"], "model_best.pth") if pipeline else content["ckpt_path"]
         # DinoV2 & VLAD settings
-        self.dinov2_extractor = DinoV2ExtractFeatures("dinov2_vitg14", content["desc_layer"], content["desc_facet"], device=self.device)
-        vocab_dir = os.path.join("dinov2_vitg14", f"l{content['desc_layer']}_{content['desc_facet']}_c{content['num_clusters']}")
+        self.dinov2_extractor = DinoV2ExtractFeatures(weights_source, content["desc_layer"], content["desc_facet"], device=self.device)
+        vocab_dir = os.path.join(content["model_type"], f"l{content['desc_layer']}_{content['desc_facet']}_c{content['num_clusters']}")
         c_centers_file = os.path.join(root, content["cache_dir"], "vocabulary", vocab_dir, content["domain"], "c_centers.pt")
         c_centers = torch.load(c_centers_file)
         assert c_centers.shape[0] == content["num_clusters"], f"Wrong number of clusters! (from file {c_centers.shape[0]} != from config {content['num_clusters']})"
@@ -30,7 +34,7 @@ class VLADDinoV2FeatureExtractor:
             # Extract descriptor
             features = self.dinov2_extractor(scaled_imgs) # [num_imgs, num_patches, desc_dim]
             vlad_feats = [self.vlad.generate(features[i].cpu().squeeze()) for i in range(features.shape[0])] # VLAD:  [agg_dim]
-            return torch.stack(vlad_feats).detach() # shape: [num_imgs, agg_dim]
+            return features.detach().cpu(), torch.stack(vlad_feats).detach() # shape: [num_imgs, agg_dim]
     
     def downscale(self, images):
         if max(images.shape[-2:]) > self.max_image_size:

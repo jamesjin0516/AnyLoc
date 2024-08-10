@@ -237,7 +237,12 @@ class DinoV2ExtractFeatures:
         """
         self.vit_type: str = dino_model
         self.dino_model: nn.Module = torch.hub.load(
-                'facebookresearch/dinov2', dino_model)
+                'facebookresearch/dinov2', (dino_model if dino_model
+                in ["dinov2_vits14", "dinov2_vitb14", "dinov2_vitl14",
+                    "dinov2_vitg14"] else "dinov2_vitg14"))
+        if os.path.exists(dino_model):    # local path
+            self.dino_model.load_state_dict(torch.load(dino_model))
+            print(f"AnyLoc DinoV2 loaded weights from {dino_model}")
         self.device = torch.device(device)
         self.dino_model = self.dino_model.eval().to(self.device)
         self.layer: int = layer
