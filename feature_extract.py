@@ -17,7 +17,7 @@ class VLADDinoV2FeatureExtractor:
             self.saved_state = {"epoch": 0, "best_score": 0}
         else:
             weights_source = os.path.join(content["ckpt_path"], "model_best.pth") if pipeline else content["ckpt_path"]
-            self.saved_state = torch.load(weights_source)
+            self.saved_state = torch.load(weights_source, map_location=self.device)
             if self.saved_state.keys() == {"epoch", "best_score", "state_dict"}:
                 weights_source = os.path.join(content["ckpt_path"], "dino_model_temp.pth")
                 torch.save(self.saved_state["state_dict"], weights_source)
@@ -43,7 +43,8 @@ class VLADDinoV2FeatureExtractor:
         # Extract descriptor
         features = self.dinov2_extractor(scaled_imgs) # [num_imgs, num_patches, desc_dim]
         vlad_feats = [self.vlad.generate(features[i].cpu().squeeze()) for i in range(features.shape[0])] # VLAD:  [agg_dim]
-        return features, torch.stack(vlad_feats).to(self.device) # shape: [num_imgs, agg_dim]
+        features_map = features.reshape((b, h_new // 14, w_new // 14, features.shape[-1])).permute(0, 3, 1, 2)
+        return features_map, torch.stack(vlad_feats).to(self.device) # shape: [num_imgs, agg_dim]
     
     def downscale(self, images):
         if max(images.shape[-2:]) > self.max_image_size:
@@ -61,10 +62,11 @@ class VLADDinoV2FeatureExtractor:
     def set_train(self, is_train):
         self.dinov2_extractor.dino_model.train(is_train)
     
-    def torch_compile(self, float32=False, **compile_args):
+    def torch_compile(self, **compile_args):
         self.dinov2_extractor.dino_model = torch.compile(self.dinov2_extractor.dino_model, **compile_args)
-        if float32:
-            self.dinov2_extractor.dino_model.to(torch.float32)
+    
+    def set_float32(self):
+        self.dinov2_extractor.dino_model.to(torch.float32)
     
     def save_state(self, save_path, new_state):
         new_state["state_dict"] = self.dinov2_extractor.dino_model.state_dict()
