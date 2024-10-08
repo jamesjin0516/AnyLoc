@@ -3,6 +3,7 @@
 """
 
 # %%
+import threading
 import numpy as np
 import torch
 from torch import nn
@@ -258,12 +259,16 @@ class DinoV2ExtractFeatures:
         self.use_cls = use_cls
         self.norm_descs = norm_descs
         # Hook data
-        self._hook_out = None
+        self._hook_out = {}
     
     def _generate_forward_hook(self):
         def _forward_hook(module, inputs, output):
-            self._hook_out = output
+        # Solution from https://discuss.pytorch.org/t/aggregating-the-results-of-forward-backward-hook-on-nn-dataparallel-multi-gpu/28981/8
+            self._hook_out[threading.get_native_id()] = output
         return _forward_hook
+    
+    def set_parallel(self):
+        self.dino_model = nn.DataParallel(self.dino_model)
     
     def __call__(self, img: torch.Tensor) -> torch.Tensor:
         """
@@ -272,6 +277,7 @@ class DinoV2ExtractFeatures:
         """
         # with torch.no_grad():
         res = self.dino_model(img)
+        self._hook_out = torch.concatenate([val.to(self.device) for val in self._hook_out.values()])
         if self.use_cls:
             res = self._hook_out
         else:
@@ -286,7 +292,7 @@ class DinoV2ExtractFeatures:
                 res = res[:, :, 2*d_len:]
         if self.norm_descs:
             res = F.normalize(res, dim=-1)
-        self._hook_out = None   # Reset the hook
+        self._hook_out = {}   # Reset the hook
         return res
     
     def __del__(self):

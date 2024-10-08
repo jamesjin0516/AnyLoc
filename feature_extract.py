@@ -1,8 +1,12 @@
 import os
+import random
 import torch
+import threading
 from torchvision import transforms
 from torchvision.transforms import functional
 from .utilities import DinoV2ExtractFeatures, VLAD
+
+import debugpy
 
 
 class VLADDinoV2FeatureExtractor:
@@ -10,6 +14,9 @@ class VLADDinoV2FeatureExtractor:
     def __init__(self, root, content, pipeline=False):
         self.max_image_size = content["max_image_size"]
         self.device = "cuda" if content["cuda"] else "cpu"
+        random.seed()
+        debugpy.breakpoint()
+        temp_weight_name = str(threading.get_native_id()) + ".pth"
 
         if content["ckpt_path"] == "None":
             weights_source = content["model_type"]
@@ -19,13 +26,23 @@ class VLADDinoV2FeatureExtractor:
             weights_source = os.path.join(content["ckpt_path"], "model_best.pth") if pipeline else content["ckpt_path"]
             self.saved_state = torch.load(weights_source, map_location=self.device)
             if self.saved_state.keys() == {"epoch", "best_score", "state_dict"}:
-                weights_source = os.path.join(content["ckpt_path"], "dino_model_temp.pth")
+                # Remove module prefix from state dict
+                state_dict_keys = list(self.saved_state["state_dict"].keys())
+                for state_key in state_dict_keys:
+                    if state_key.startswith("module"):
+                        new_key = state_key.removeprefix("module.")
+                        self.saved_state["state_dict"][new_key] = self.saved_state["state_dict"][state_key]
+                        del self.saved_state["state_dict"][state_key]
+                debugpy.breakpoint()
+                weights_source = os.path.join(content["ckpt_path"], temp_weight_name)
                 torch.save(self.saved_state["state_dict"], weights_source)
             else:
                 self.saved_state = {"epoch": 0, "best_score": 0}
         # DinoV2 & VLAD settings
+        debugpy.breakpoint()
         self.dinov2_extractor = DinoV2ExtractFeatures(weights_source, content["desc_layer"], content["desc_facet"], device=self.device)
-        if os.path.exists(os.path.join(content["ckpt_path"], "dino_model_temp.pth")): os.remove(os.path.join(content["ckpt_path"], "dino_model_temp.pth"))
+        debugpy.breakpoint()
+        if os.path.exists(os.path.join(content["ckpt_path"], temp_weight_name)): os.remove(os.path.join(content["ckpt_path"], temp_weight_name))
         self.saved_state["state_dict"] = self.dinov2_extractor.dino_model.state_dict()
 
         vocab_dir = os.path.join(content["model_type"], f"l{content['desc_layer']}_{content['desc_facet']}_c{content['num_clusters']}")
@@ -64,6 +81,9 @@ class VLADDinoV2FeatureExtractor:
     
     def torch_compile(self, **compile_args):
         self.dinov2_extractor.dino_model = torch.compile(self.dinov2_extractor.dino_model, **compile_args)
+    
+    def set_parallel(self):
+        self.dinov2_extractor.set_parallel()
     
     def set_float32(self):
         self.dinov2_extractor.dino_model.to(torch.float32)
